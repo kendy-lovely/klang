@@ -7,16 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <locale.h>
 #define DEBUG 0
-
-#define RES_CAP 8*1024
-
-typedef enum 
-{
-    S_NAN = -1,
-    S_BREAK = -2
-} Signals;
 
 #define TOKEN_TYPES \
     X(NONE_NIL)    \
@@ -109,25 +100,25 @@ typedef struct expr Expression;
 
 typedef struct
 {
-    TokenType oper;
     struct expr *lhs;
     struct expr *rhs; 
+    TokenType oper;
 } Operation;
 
 typedef union
 {
+    Operation operation;
     long double num;
     char *string;
     char *identity;
-    Operation operation;
     struct expr *parentheses;
 } ExpressionAs;
 
 struct expr 
 {
-    ExpressionType type;
     ExpressionAs as;
     Expression *nextLine;
+    ExpressionType type;
 };
 
 typedef struct {
@@ -339,6 +330,8 @@ Token *tokenize(char* in)
                     if (detectKeyword("while", LOOP_WHL))           continue;
                     if (detectKeyword("times", LOOP_TIM))           continue;
                     if (detectKeywordForOper("log", OPER_LOG))      continue;
+                    if (detectKeywordWithValue("true", 1))      continue;
+                    if (detectKeywordWithValue("false", 0))      continue;
                     if (detectKeywordWithValue("a dozen", 12))      continue;
                     if (detectKeywordWithValue("a score", 20))      continue;
                     if (detectKeywordWithValue("the gross", 144))   continue;
@@ -794,6 +787,8 @@ void lispify(Expression *expr)
         [OPER_EQL] = "=",
         [OPER_LOG] = "log",
         [OPER_MOD] = "%",
+        [OPER_MOR] = ">",
+        [OPER_LES] = "<",
         [UNRY_NEG] = "-",
         [UNRY_INV] = "!",
         [PARN_OPN] = "(",
@@ -830,7 +825,7 @@ void lispify(Expression *expr)
                             ? display(expr->as.operation.rhs)
                             : strdup("");
                 sprintf(buff, "(%s ", tokenToLisp[oper]);
-                sprintf(buff2, "%s%s%s)", lhs, expr->as.operation.lhs ? " " : "", rhs);
+                sprintf(buff2, "%s%s%s)", lhs, expr->as.operation.lhs && expr->as.operation.rhs ? " " : "", rhs);
                 strcat(buff, buff2);
 
                 free(lhs);
@@ -969,9 +964,9 @@ void evaluate(Expression* expr)
                 expr->as.operation.oper == CTRL_DOX 
                 || expr->as.operation.oper == EXPR_ASG 
                 || expr->as.operation.oper == EXPR_MUT
+                || expr->as.operation.oper == EXPR_FUN 
                 || expr->as.operation.oper == LOOP_TIM 
                 || expr->as.operation.oper == LOOP_WHL 
-                || expr->as.operation.oper == EXPR_FUN 
                     ? expr->as.operation.lhs 
                     : eval(expr->as.operation.lhs); 
 
@@ -1016,29 +1011,24 @@ void evaluate(Expression* expr)
                         result = copyExpr(rhs);
                     break;
                     case IIOO_OUT:
-                    {
-                        Expression *right = copyExpr(rhs);
-                        switch (right->type)
+                        switch (rhs->type)
                         {
-                            case NUM: printf("%Lg", right->as.num);       break;
-                            case STRING: printf("%s", right->as.string);  break;
+                            case NUM: printf("%Lg", rhs->as.num);       break;
+                            case STRING: printf("%s", rhs->as.string);  break;
                             default: unreachable();
                         }
-                        result = right;
-                    }
+                        result = copyExpr(rhs);
                     break;
                     case LOOP_TIM:
                         if (rhs->type != NUM)
                             error("condition must be a number (boolean).");
+
                         for (size_t i = 0; i < rhs->as.num; i++)
                             result = eval(copyExpr(lhs));
                     break;
                     case LOOP_WHL:
                         while (rhs && eval(copyExpr(rhs))->as.num)
                             result = eval(copyExpr(lhs));
-                    break;
-                    case CTRL_THN:
-                        result = copyExpr(rhs);
                     break;
                     case OPER_PLS:
                         if (result->type == STRING)
@@ -1079,12 +1069,13 @@ void evaluate(Expression* expr)
                         result = eval(result);
                         lhs = NULL;            
                     break;
+                    case CTRL_THN: result = copyExpr(rhs);                          break;
                     case OPER_EQL: result->as.num = (lhs->as.num == rhs->as.num);   break;
                     case OPER_MIN: result->as.num = (lhs->as.num - rhs->as.num);    break;
                     case OPER_MUL: result->as.num = (lhs->as.num * rhs->as.num);    break;
                     case OPER_DIV: result->as.num = (lhs->as.num / rhs->as.num);    break;
                     case OPER_MOD: result->as.num = 
-                        (long double )((int)lhs->as.num % (int)rhs->as.num);        break;
+                        (long double)((int)lhs->as.num % (int)rhs->as.num);        break;
                     case OPER_EXP: result->as.num = powl(lhs->as.num, rhs->as.num); break;
                     case OPER_LOG: 
                         result->as.num = log10l(rhs->as.num) / log10l(lhs->as.num); break;
